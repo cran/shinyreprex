@@ -343,12 +343,91 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 <div id="using-shinyreprex" class="section level2">
 <h2>Using shinyreprex</h2>
-<p>There is a single exported function, <code>reprex_reactive</code>,
-that takes a reactive object and converts it into a script that can be
-reused outside of the Shiny application to reproduce the result of the
-reactive. This can be sent to a simple <code>verbatimTextOutput</code>
-or something more UX friendly such as the <code>{highlighter}</code>
-package to display the script in the UI.</p>
+<p><code>reprex_reactive</code> takes a reactive object and converts it
+into a script that can be reused outside of the Shiny application to
+reproduce the result of the reactive. This can be sent to a simple
+<code>verbatimTextOutput</code> or something more UX friendly such as
+the <code>{highlighter}</code> package to display the script in the
+UI.</p>
+<p>A script on its own reproduces the <em>code</em>, but not the
+environment it ran in. The remaining three functions close that gap:</p>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>reprex_reactive</code></td>
+<td>Turn a reactive into a stand-alone script</td>
+</tr>
+<tr class="even">
+<td><code>reprex_packages</code></td>
+<td>List the packages needed to run that script</td>
+</tr>
+<tr class="odd">
+<td><code>reprex_lockfile</code></td>
+<td>Capture those packages, their versions and sources as an
+<code>renv</code> lockfile</td>
+</tr>
+<tr class="even">
+<td><code>register_reactives</code></td>
+<td>Record reactives so the two functions above can be called with no
+arguments</td>
+</tr>
+</tbody>
+</table>
+<p>A worked example covering all four ships with the package:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>shiny<span class="sc">::</span><span class="fu">runExample</span>(<span class="st">&quot;lockfile&quot;</span>, <span class="at">package =</span> <span class="st">&quot;shinyreprex&quot;</span>)</span></code></pre></div>
+</div>
+<div id="reproducing-the-environment" class="section level2">
+<h2>Reproducing the Environment</h2>
+<p><code>reprex_reactive</code> emits the <code>library()</code> calls a
+script needs, but not the versions those packages were at.
+<code>reprex_lockfile</code> records them, along with the R version and
+the full recursive dependency tree, so the environment can be rebuilt
+rather than approximated.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>output<span class="sc">$</span>lockfile <span class="ot">&lt;-</span> <span class="fu">downloadHandler</span>(</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>  <span class="at">filename =</span> <span class="cf">function</span>() <span class="st">&quot;renv.lock&quot;</span>,</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  <span class="at">content =</span> <span class="cf">function</span>(file) <span class="fu">reprex_lockfile</span>(summary_tbl, <span class="at">lockfile =</span> file)</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>)</span></code></pre></div>
+<p>Whoever receives the lockfile restores it with <code>renv</code>:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">restore</span>(<span class="at">lockfile =</span> <span class="st">&quot;renv.lock&quot;</span>)</span></code></pre></div>
+<p>Use <code>reprex_packages</code> when you want to show the detected
+packages before pinning them, for example to let the user narrow the
+set:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="fu">reprex_lockfile</span>(summary_tbl, <span class="at">packages =</span> input<span class="sc">$</span>packages, <span class="at">lockfile =</span> file)</span></code></pre></div>
+<p>Supplying <code>packages</code> is also the escape hatch when the
+detector cannot see a package, such as one attached only for an operator
+or an S3 method.</p>
+<div id="registering-reactives-across-modules" class="section level3">
+<h3>Registering Reactives Across Modules</h3>
+<p>In a modular application the reactives worth reproducing live inside
+their own modules. Rather than returning them all up to the top level,
+each module registers what it owns:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>summaryServer <span class="ot">&lt;-</span> <span class="cf">function</span>(id) {</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>    summary_tbl <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>      <span class="fu">aggregate</span>(Sepal.Width <span class="sc">~</span> Species, <span class="at">data =</span> iris, <span class="at">FUN =</span> <span class="fu">get</span>(input<span class="sc">$</span>summary_fn))</span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>    })</span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a>    <span class="fu">register_reactives</span>(summary_tbl)</span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" tabindex="-1"></a>    summary_tbl</span>
+<span id="cb5-10"><a href="#cb5-10" tabindex="-1"></a>  })</span>
+<span id="cb5-11"><a href="#cb5-11" tabindex="-1"></a>}</span></code></pre></div>
+<p><code>reprex_lockfile()</code> and <code>reprex_packages()</code>
+then cover the whole application when called with no arguments.
+Registrations are namespaced by module, held on the session, and
+discarded when the session ends, so they are never shared between
+concurrent users.</p>
+</div>
 </div>
 <div id="best-practices" class="section level2">
 <h2>Best Practices</h2>
@@ -358,17 +437,40 @@ package to display the script in the UI.</p>
 input or reactive feeding into the provided reactive is updated,
 therefore it is recommended to have the reactive as an event
 attached.</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
-<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
-<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>})</span>
-<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a></span>
-<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="co"># Good</span></span>
-<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>repro_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">reprex_reactive</span>(width_range)) <span class="sc">|&gt;</span></span>
-<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a>  <span class="fu">bindEvent</span>(<span class="fu">width_range</span>())</span>
-<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>  </span>
-<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="co"># Bad</span></span>
-<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>repro_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">reprex_reactive</span>(width_range))</span></code></pre></div>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>})</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a><span class="co"># Good</span></span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a>repro_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">reprex_reactive</span>(width_range)) <span class="sc">|&gt;</span></span>
+<span id="cb6-8"><a href="#cb6-8" tabindex="-1"></a>  <span class="fu">bindEvent</span>(<span class="fu">width_range</span>())</span>
+<span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>  </span>
+<span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a><span class="co"># Bad</span></span>
+<span id="cb6-11"><a href="#cb6-11" tabindex="-1"></a>repro_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">reprex_reactive</span>(width_range))</span></code></pre></div>
+</div>
+<div id="register-reactives-at-module-setup" class="section level3">
+<h3>Register Reactives at Module Setup</h3>
+<p><code>register_reactives</code> does not evaluate the reactive it is
+given, so it can be called as soon as the reactive is defined, even when
+that reactive is still gated behind <code>shiny::req</code> or inputs
+that have yet to be set. Registering at setup means a lockfile covers
+every module regardless of which parts of the application the user
+happened to visit.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="co"># Good</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>summary_tbl <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>  shiny<span class="sc">::</span><span class="fu">req</span>(input<span class="sc">$</span>summary_fn)</span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>  <span class="fu">aggregate</span>(Sepal.Width <span class="sc">~</span> Species, <span class="at">data =</span> iris, <span class="at">FUN =</span> <span class="fu">get</span>(input<span class="sc">$</span>summary_fn))</span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>})</span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a></span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="fu">register_reactives</span>(summary_tbl)</span>
+<span id="cb7-8"><a href="#cb7-8" tabindex="-1"></a></span>
+<span id="cb7-9"><a href="#cb7-9" tabindex="-1"></a><span class="co"># Bad - the reactive is only registered once the user has viewed the output,</span></span>
+<span id="cb7-10"><a href="#cb7-10" tabindex="-1"></a><span class="co"># so a lockfile downloaded beforehand silently misses it</span></span>
+<span id="cb7-11"><a href="#cb7-11" tabindex="-1"></a>output<span class="sc">$</span>table <span class="ot">&lt;-</span> <span class="fu">renderTable</span>({</span>
+<span id="cb7-12"><a href="#cb7-12" tabindex="-1"></a>  <span class="fu">register_reactives</span>(summary_tbl)</span>
+<span id="cb7-13"><a href="#cb7-13" tabindex="-1"></a>  <span class="fu">summary_tbl</span>()</span>
+<span id="cb7-14"><a href="#cb7-14" tabindex="-1"></a>})</span></code></pre></div>
 </div>
 <div id="put-side-effects-in-observers" class="section level3">
 <h3>Put Side-Effects in Observers</h3>
@@ -376,29 +478,29 @@ attached.</p>
 avoid putting code for its side effects in <code>reactive</code>
 expressions, and instead create smaller reactive calls, and have
 observers running the code not intended for reproducing outputs.</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="co"># Good</span></span>
-<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
-<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
-<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>})</span>
-<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a></span>
-<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a><span class="fu">observe</span>({</span>
-<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>  <span class="fu">updateSliderInput</span>(<span class="st">&quot;width&quot;</span>, <span class="fu">width_range</span>())</span>
-<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>})</span>
-<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a></span>
-<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a><span class="co"># Bad</span></span>
-<span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
-<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>  widths <span class="ot">&lt;-</span> <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
-<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>  <span class="fu">updateSliderInput</span>(<span class="st">&quot;width&quot;</span>, widths)</span>
-<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>  widths</span>
-<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>})</span>
-<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a></span>
-<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a>summary_data <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
-<span id="cb2-21"><a href="#cb2-21" tabindex="-1"></a>  shinyjs<span class="sc">::</span><span class="fu">toggle</span>(<span class="st">&quot;table&quot;</span>, <span class="at">condition =</span> <span class="fu">nrow</span>(iris_filt) <span class="sc">&gt;</span> <span class="dv">0</span><span class="dt">L</span>)</span>
-<span id="cb2-22"><a href="#cb2-22" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">summarise</span>(iris_filt, dplyr<span class="sc">::</span><span class="fu">across</span>(<span class="fu">where</span>(is.numeric), mean))</span>
-<span id="cb2-23"><a href="#cb2-23" tabindex="-1"></a>})</span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a><span class="co"># Good</span></span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>  <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>})</span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a></span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="fu">observe</span>({</span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a>  <span class="fu">updateSliderInput</span>(<span class="st">&quot;width&quot;</span>, <span class="fu">width_range</span>())</span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a>})</span>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a></span>
+<span id="cb8-11"><a href="#cb8-11" tabindex="-1"></a><span class="co"># Bad</span></span>
+<span id="cb8-12"><a href="#cb8-12" tabindex="-1"></a>width_range <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb8-13"><a href="#cb8-13" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
+<span id="cb8-14"><a href="#cb8-14" tabindex="-1"></a>  widths <span class="ot">&lt;-</span> <span class="fu">range</span>(iris_filt<span class="sc">$</span>Petal.Width)</span>
+<span id="cb8-15"><a href="#cb8-15" tabindex="-1"></a>  <span class="fu">updateSliderInput</span>(<span class="st">&quot;width&quot;</span>, widths)</span>
+<span id="cb8-16"><a href="#cb8-16" tabindex="-1"></a>  widths</span>
+<span id="cb8-17"><a href="#cb8-17" tabindex="-1"></a>})</span>
+<span id="cb8-18"><a href="#cb8-18" tabindex="-1"></a></span>
+<span id="cb8-19"><a href="#cb8-19" tabindex="-1"></a>summary_data <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb8-20"><a href="#cb8-20" tabindex="-1"></a>  iris_filt <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;versicolor&quot;</span>)</span>
+<span id="cb8-21"><a href="#cb8-21" tabindex="-1"></a>  shinyjs<span class="sc">::</span><span class="fu">toggle</span>(<span class="st">&quot;table&quot;</span>, <span class="at">condition =</span> <span class="fu">nrow</span>(iris_filt) <span class="sc">&gt;</span> <span class="dv">0</span><span class="dt">L</span>)</span>
+<span id="cb8-22"><a href="#cb8-22" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">summarise</span>(iris_filt, dplyr<span class="sc">::</span><span class="fu">across</span>(<span class="fu">where</span>(is.numeric), mean))</span>
+<span id="cb8-23"><a href="#cb8-23" tabindex="-1"></a>})</span></code></pre></div>
 </div>
 <div id="create-a-business-logic-package" class="section level3">
 <h3>Create a Business Logic Package</h3>
@@ -414,22 +516,75 @@ install all the packages associated with the application.</p>
 that they are defined within a reactive expression. If it is defined in
 the module, or in the global environment, the secret will be written in
 the assignment.</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="co"># Good</span></span>
-<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
-<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>    api_key <span class="ot">&lt;-</span> <span class="fu">Sys.getenv</span>(<span class="st">&quot;MY_API_KEY&quot;</span>)</span>
-<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>    ...</span>
-<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>  })</span>
-<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>})</span>
-<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a></span>
-<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a><span class="co"># Bad</span></span>
-<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a><span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
-<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a>  api_key <span class="ot">&lt;-</span> <span class="fu">Sys.getenv</span>(<span class="st">&quot;MY_API_KEY&quot;</span>)</span>
-<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a>  </span>
-<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a>  my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
-<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a>    ...</span>
-<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a>  })</span>
-<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a>})</span></code></pre></div>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="co"># Good</span></span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>    api_key <span class="ot">&lt;-</span> <span class="fu">Sys.getenv</span>(<span class="st">&quot;MY_API_KEY&quot;</span>)</span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>    ...</span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a>  })</span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a>})</span>
+<span id="cb9-8"><a href="#cb9-8" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" tabindex="-1"></a><span class="co"># Bad</span></span>
+<span id="cb9-10"><a href="#cb9-10" tabindex="-1"></a><span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
+<span id="cb9-11"><a href="#cb9-11" tabindex="-1"></a>  api_key <span class="ot">&lt;-</span> <span class="fu">Sys.getenv</span>(<span class="st">&quot;MY_API_KEY&quot;</span>)</span>
+<span id="cb9-12"><a href="#cb9-12" tabindex="-1"></a></span>
+<span id="cb9-13"><a href="#cb9-13" tabindex="-1"></a>  my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>({</span>
+<span id="cb9-14"><a href="#cb9-14" tabindex="-1"></a>    ...</span>
+<span id="cb9-15"><a href="#cb9-15" tabindex="-1"></a>  })</span>
+<span id="cb9-16"><a href="#cb9-16" tabindex="-1"></a>})</span></code></pre></div>
+</div>
+</div>
+<div id="limitations" class="section level2">
+<h2>Limitations</h2>
+<p>Reproducible code is generated by reading the expression held in a
+reactive, rather than by tracing what it does when it runs. That keeps
+the process cheap and independent of the current inputs, but it sets
+some boundaries worth knowing about.</p>
+<div id="only-the-reactive-expression-is-read" class="section level3">
+<h3>Only the Reactive Expression is Read</h3>
+<p>Calls made inside a function that is defined elsewhere are not
+visited, so anything used only in that function is neither reproduced
+nor detected as a package.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>summarise_widths <span class="ot">&lt;-</span> <span class="cf">function</span>(dat) dplyr<span class="sc">::</span><span class="fu">summarise</span>(dat, <span class="fu">mean</span>(Petal.Width))</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a></span>
+<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">summarise_widths</span>(iris))</span></code></pre></div>
+<p>Here the script reproduces the call to <code>summarise_widths</code>,
+but <code>dplyr</code> is not reported. Keeping the work inside the
+reactive, or moving it into a package that the recipient installs,
+avoids this. See also <em>Create a Business Logic Package</em>
+above.</p>
+</div>
+<div id="non-standard-evaluation-is-best-effort" class="section level3">
+<h3>Non-Standard Evaluation is Best-Effort</h3>
+<p>Data-masking functions such as <code>dplyr::filter</code> or
+<code>subset</code> refer to columns as if they were variables. Since
+the column names are only distinguishable from real variables at run
+time, a collision between the two can produce a misleading line in the
+script:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a><span class="fu">moduleServer</span>(id, <span class="cf">function</span>(input, output, session) {</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>  Species <span class="ot">&lt;-</span> <span class="st">&quot;versicolor&quot;</span></span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a></span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>  my_reactive <span class="ot">&lt;-</span> <span class="fu">reactive</span>(<span class="fu">subset</span>(iris, Species <span class="sc">==</span> <span class="st">&quot;setosa&quot;</span>))</span>
+<span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a>})</span></code></pre></div>
+<p><code>Species</code> in the reactive is a column of
+<code>iris</code>, but a variable of the same name exists in the module,
+so the script includes an unnecessary
+<code>Species &lt;- &quot;versicolor&quot;</code> assignment. The reproduced code
+still runs, because <code>subset</code> masks the variable with the
+column, but the extra line is misleading. Avoiding names that clash with
+the columns being masked avoids this.</p>
+<p>Similarly, an input captured with <code>rlang::quo</code> and spliced
+back in later cannot be resolved to its value, and appears in the script
+with the <code>!!</code> still in place.</p>
+</div>
+<div id="detected-packages-can-be-a-superset" class="section level3">
+<h3>Detected Packages Can Be a Superset</h3>
+<p><code>reprex_packages</code> walks every branch of an <code>if</code>
+or <code>switch</code> rather than evaluating the condition and
+following only the branch that would be taken. A lockfile may therefore
+pin a package that the script does not end up needing. This is
+deliberate: a lockfile holding a package that is not needed is safer
+than one missing a package that is.</p>
 </div>
 </div>
 
